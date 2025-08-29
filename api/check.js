@@ -1,7 +1,6 @@
 // Vercel API endpoint untuk Periksa Kata
 // Proxy ke OpenAI GPT-4o mini dengan rate limiting dan validation
 
-import crypto from 'crypto';
 
 // Rate limiting storage (in-memory untuk demo, gunakan Redis untuk production)
 const rateLimitStore = new Map();
