@@ -7,9 +7,6 @@
       "maxDuration": 30
     }
   },
-  "env": {
-    "OPENAI_API_KEY": "@openai-api-key"
-  },
   "headers": [
     {
       "source": "/api/(.*)",
