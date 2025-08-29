@@ -1,12 +1,5 @@
 {
   "version": 2,
-  "functions": {
-    "api/check.js": {
-      "runtime": "nodejs20.x",
-      "memory": 512,
-      "maxDuration": 30
-    }
-  },
   "headers": [
     {
       "source": "/api/(.*)",
@@ -24,12 +17,6 @@
           "value": "Content-Type, Authorization"
         }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/check",
-      "destination": "/api/check.js"
     }
   ]
 }
