@@ -1,0 +1,42 @@
+{
+  "name": "periksa-kata-proxy",
+  "version": "1.0.0",
+  "description": "Vercel proxy untuk Periksa Kata Chrome Extension - menghubungkan ke OpenAI GPT-4o mini",
+  "main": "api/check.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "vercel build",
+    "deploy": "vercel --prod",
+    "test": "node test/test-api.js"
+  },
+  "dependencies": {
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.0",
+    "vercel": "^32.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "indonesian",
+    "grammar",
+    "spell-check",
+    "eyd",
+    "chrome-extension",
+    "openai",
+    "vercel"
+  ],
+  "author": "Periksa Kata Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/periksa-kata/extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/periksa-kata/extension/issues"
+  },
+  "homepage": "https://github.com/periksa-kata/extension#readme"
+}
