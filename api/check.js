@@ -1,6 +1,7 @@
 // Vercel API endpoint untuk Periksa Kata
 // Proxy ke OpenAI GPT-4o mini dengan rate limiting dan validation
 
+import { createHash } from 'crypto';
 
 // Rate limiting storage (in-memory untuk demo, gunakan Redis untuk production)
 const rateLimitStore = new Map();
@@ -185,7 +186,7 @@ function validateRequest(data) {
 
 // Create text fingerprint
 function createTextFingerprint(text) {
-  return crypto.createHash('sha256').update(text, 'utf8').digest('hex').substring(0, 16);
+  return createHash('sha256').update(text, 'utf8').digest('hex').substring(0, 16);
 }
 
 // Call OpenAI API
