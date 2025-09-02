@@ -24,19 +24,55 @@ const CONFIG = {
 };
 
 // LLM System Prompt
-const SYSTEM_PROMPT = `Kamu adalah pemeriksa bahasa Indonesia yang ketat: perbaiki **typo**, **ejaan sesuai EYD/PUEBI**, dan **kesalahan konteks** (pilih kata yang benar berdasarkan makna kalimat).
-Jawaban **WAJIB** hanya berupa JSON valid mengikuti **Output Schema**. Jangan menulis penjelasan di luar JSON.
+const SYSTEM_PROMPT = `Kamu adalah pemeriksa bahasa Indonesia yang ahli. Tugas kamu adalah mendeteksi dan memperbaiki kesalahan dalam teks bahasa Indonesia dengan fokus pada 4 kategori utama:
 
-Panduan:
-* **Kategori**:
-  * "typo" untuk salah ketik/kemiripan grafem (aktiviyas→aktivitas).
-  * "eyd" untuk kata tidak baku/tidak sesuai EYD (ijin→izin; resiko→risiko).
-  * "konteks" untuk kata benar ejaan tetapi salah makna pada kalimat (dubur→bubur).
-* **Offsets**: start = index karakter awal, end = index karakter setelah akhir (**exclusive**), dihitung pada **teks mentah** yang diberikan (tanpa HTML).
-* Jika ada beberapa kandidat yang wajar, pilih satu "after" terbaik dan tuliskan alasan ringkas pada "message".
-* Hindari "membetulkan" gaya bahasa yang sah bila tidak wajib (jangan terlalu agresif).
-* Boleh menggabungkan beberapa kata jika itu perbaikan EYD (di lain→di lain? cek konteks; "di dalam" vs "didalam").
-* Jaga **maksimal 1 saran per span**; untuk frasa yang panjang boleh satu entri dengan start/end yang mencakup frasa.`;
+1. **TYPO/SALAH KETIK**: Kesalahan pengetikan seperti huruf hilang, tambahan, atau salah posisi
+   - Contoh: "mkn" → "makan", "slh" → "salah", "tdk" → "tidak", "sya" → "saya", "enk" → "enak"
+   - Termasuk singkatan tidak standar yang seharusnya ditulis lengkap
+   - Prioritaskan kata yang kehilangan huruf vokal atau konsonan penting
+   - PENTING: Dalam kalimat "Sya mkn beberapa ayam yang enk sekali" harus mendeteksi 3 kesalahan: "Sya", "mkn", dan "enk"
+
+2. **KATA TIDAK BAKU**: Kata yang tidak sesuai dengan Kamus Besar Bahasa Indonesia (KBBI)
+   - Contoh: "ijin" → "izin", "resiko" → "risiko", "aktifitas" → "aktivitas"
+   - Kata serapan yang salah ejaan: "system" → "sistem", "methode" → "metode"
+
+3. **KESALAHAN EYD/PUEBI**: Kesalahan penulisan sesuai Ejaan Yang Disempurnakan
+   - Penulisan kata depan: "kepasar" → "ke pasar", "dirumah" → "di rumah"
+   - Penulisan awalan: "di ambil" → "diambil", "ter buka" → "terbuka"
+   - Penulisan partikel: "apa kah" → "apakah", "bagai mana" → "bagaimana"
+
+4. **KESALAHAN KONTEKS**: Kata benar ejaan tapi salah makna dalam kalimat
+   - Contoh: "makan dubur ayam" → "makan bubur ayam"
+   - Homonim dan kata mirip yang salah konteks
+
+PERINTAH KHUSUS:
+- Periksa SETIAP kata dalam teks, jangan lewatkan kesalahan yang mencolok
+- WAJIB DETEKSI: Kata seperti "sya", "mkn", "enk", "tdk", "slh" adalah kesalahan PASTI yang harus dideteksi
+- Scan SELURUH kalimat: Jangan berhenti setelah menemukan beberapa kesalahan, lanjutkan sampai akhir
+- Berikan confidence tinggi (0.8-0.95) untuk kesalahan yang jelas
+- Offsets: start = index karakter awal, end = index karakter setelah akhir (exclusive)
+- Kategori: "typo", "baku", "eyd", "konteks"
+- Severity: "low", "medium", "high"
+- JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI dalam suggestions
+- BATASI JUMLAH: Maksimal 20 saran per respons untuk menghindari JSON terpotong
+
+FORMAT OUTPUT JSON:
+{
+  "suggestions": [
+    {
+      "start": 0,
+      "end": 3,
+      "category": "typo",
+      "severity": "high",
+      "message": "Kata 'sya' seharusnya 'saya'",
+      "before": "sya",
+      "after": "saya"
+    }
+  ]
+}
+
+- Jangan menulis penjelasan di luar JSON
+- WAJIB gunakan format JSON di atas dengan field: start, end, category, severity, message, before, after`;
 
 // Main handler
 export default async function handler(req, res) {
@@ -95,15 +131,45 @@ export default async function handler(req, res) {
     const textFingerprint = createTextFingerprint(text);
     
     // Call OpenAI API
-    const suggestions = await checkTextWithOpenAI(text);
+    console.log('Calling OpenAI API with text:', text.substring(0, 100) + '...');
+    console.log('Text length:', text.length, 'characters');
     
-    // Return response
+    let didCallLLM = false;
+    let skippedReason = null;
+    let suggestions = [];
+    
+    try {
+      didCallLLM = true;
+      suggestions = await checkTextWithOpenAI(text);
+      console.log('OpenAI API returned suggestions:', suggestions.length);
+      
+      if (suggestions.length === 0) {
+        console.log('OpenAI returned empty suggestions for text:', JSON.stringify(text));
+      } else {
+        console.log('OpenAI suggestions:', JSON.stringify(suggestions, null, 2));
+      }
+    } catch (error) {
+      console.error('OpenAI API call failed:', error);
+      didCallLLM = false;
+      skippedReason = 'api_error';
+      suggestions = [];
+    }
+    
+    // Return response with meta debug info
     const response = {
       version: '1.0',
       textFingerprint,
-      suggestions
+      suggestions,
+      meta: {
+        llmCalled: didCallLLM,
+        skippedReason,
+        modelUsed: CONFIG.OPENAI_MODEL,
+        textLength: text.length,
+        suggestionsCount: suggestions.length
+      }
     };
     
+    console.log('Sending response:', JSON.stringify(response, null, 2));
     return res.status(200).json(response);
     
   } catch (error) {
@@ -189,39 +255,99 @@ function createTextFingerprint(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex').substring(0, 16);
 }
 
-// Call OpenAI API
-async function checkTextWithOpenAI(text) {
-  const userPrompt = `TASK: Periksa teks bahasa Indonesia untuk typo, ejaan EYD, dan kesalahan konteks. Kembalikan JSON sesuai schema.
-
-INPUT:
-<text>
-${text}
-</text>
-
-SCHEMA:
-{
-  "version": "1.0",
-  "textFingerprint": "<sha256-of-input-text>",
-  "suggestions": [
-    {
-      "id": "string",
-      "category": "typo" | "eyd" | "konteks",
-      "severity": "low" | "medium" | "high",
-      "message": "string (alasan ringkas, bhs Indonesia)",
-      "before": "string",
-      "after": "string",
-      "start": 0,
-      "end": 0,
-      "confidence": 0.0,
-      "examples": ["string"],
-      "rules": ["string"]
+// Utility: cari kemunculan "needle" paling dekat dengan approxIndex (jika disediakan)
+function findNearestIndex(haystack, needle, approxIndex) {
+  if (!needle || needle.length === 0) return -1;
+  const occurrences = [];
+  let from = 0;
+  while (true) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx === -1) break;
+    occurrences.push(idx);
+    from = idx + 1;
+  }
+  if (occurrences.length === 0) return -1;
+  if (approxIndex == null || Number.isNaN(approxIndex)) return occurrences[0];
+  let best = occurrences[0];
+  let bestDist = Math.abs(best - approxIndex);
+  for (let i = 1; i < occurrences.length; i++) {
+    const d = Math.abs(occurrences[i] - approxIndex);
+    if (d < bestDist) {
+      best = occurrences[i];
+      bestDist = d;
     }
-  ]
+  }
+  return best;
 }
 
-RESTRICTIONS:
-- Hanya JSON, tanpa komentar atau teks lain.
-- Offsets wajib tepat terhadap INPUT.`;
+// Utility: case-insensitive search dengan pengembalian indeks akurat di haystack asli
+function findNearestIndexCI(haystack, needle, approxIndex) {
+  const hayLower = haystack.toLowerCase();
+  const needLower = (needle || '').toLowerCase();
+  if (!needLower) return -1;
+  const occurrences = [];
+  let from = 0;
+  while (true) {
+    const idx = hayLower.indexOf(needLower, from);
+    if (idx === -1) break;
+    occurrences.push(idx);
+    from = idx + 1;
+  }
+  if (occurrences.length === 0) return -1;
+  if (approxIndex == null || Number.isNaN(approxIndex)) return occurrences[0];
+  let best = occurrences[0];
+  let bestDist = Math.abs(best - approxIndex);
+  for (let i = 1; i < occurrences.length; i++) {
+    const d = Math.abs(occurrences[i] - approxIndex);
+    if (d < bestDist) {
+      best = occurrences[i];
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+// Call OpenAI API
+async function checkTextWithOpenAI(text) {
+  const userPrompt = `Periksa teks berikut dan temukan SEMUA kesalahan ejaan, typo, EYD, dan konteks:
+
+"${text}"
+
+Cari dengan teliti:
+✓ Typo/singkatan: huruf hilang, singkatan tidak standar
+✓ Kata tidak baku: kata yang tidak ada di KBBI
+✓ EYD: penulisan kata depan, awalan, akhiran
+✓ Konteks: kata benar ejaan tapi salah makna
+
+ATURAN PENTING:
+- JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI
+- MAKSIMAL 20 saran untuk menghindari respons terpotong
+- Prioritaskan kesalahan yang paling mencolok
+
+PENTING - PENGHITUNGAN OFFSET:
+- Hitung posisi karakter dengan SANGAT TELITI
+- start = index karakter pertama dari kata yang salah
+- end = index karakter setelah kata yang salah (exclusive)
+- Field 'before' HARUS sama persis dengan teks di posisi start-end (CASE SENSITIVE)
+- Pertahankan kapitalisasi asli: jika teks asli 'Sya' maka before: 'Sya', bukan 'sya'
+- Jangan sertakan spasi di awal/akhir kecuali memang bagian dari kesalahan
+
+Contoh untuk "Ini adalah demnstrasi":
+- Kata "demnstrasi" dimulai di index 11, berakhir di index 21
+- before: "demnstrasi" (tanpa spasi)
+- after: "demonstrasi"
+
+Contoh untuk "Sya mkn ayam":
+- Kata "Sya" dimulai di index 0, berakhir di index 3
+- before: "Sya" (dengan huruf besar S, sesuai teks asli)
+- after: "Saya"
+
+Contoh untuk "Makanan ini enk sekali":
+- Kata "enk" dimulai di index 12, berakhir di index 15
+- before: "enk" (kata singkatan tidak baku)
+- after: "enak"
+
+Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
   
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -267,22 +393,95 @@ RESTRICTIONS:
     // Validate and process suggestions
     const suggestions = parsed.suggestions || [];
     const processedSuggestions = [];
-    
+
+    // Untuk mencegah duplikasi/overlap
+    const takenRanges = [];
+    const overlaps = (s, e) => takenRanges.some(([ts, te]) => !(e <= ts || s >= te));
+
     for (let i = 0; i < suggestions.length; i++) {
       const suggestion = suggestions[i];
       
-      // Validate suggestion structure
-      if (!validateSuggestion(suggestion, text)) {
-        console.warn('Invalid suggestion skipped:', suggestion);
+      // Cek struktur minimum
+      if (!basicSuggestionShapeValid(suggestion)) {
+        console.warn('Missing required field(s) on suggestion:', suggestion);
         continue;
       }
-      
-      // Add ID if missing
-      if (!suggestion.id) {
-        suggestion.id = `sg-${Date.now()}-${i}`;
+
+      // Validasi kategori/severity awal
+      if (!['typo', 'baku', 'eyd', 'konteks'].includes(suggestion.category)) {
+        console.warn('Invalid category:', suggestion.category);
+        continue;
       }
-      
-      processedSuggestions.push(suggestion);
+      if (suggestion.severity && !['low', 'medium', 'high'].includes(suggestion.severity)) {
+        console.warn('Invalid severity:', suggestion.severity);
+        continue;
+      }
+
+      let { start, end, before } = suggestion;
+      // Jaga batas
+      if (typeof start !== 'number') start = 0;
+      if (typeof end !== 'number') end = Math.min(text.length, (start || 0) + String(before || '').length);
+      start = Math.max(0, Math.min(start, text.length));
+      end = Math.max(start, Math.min(end, text.length));
+
+      let actualText = text.slice(start, end);
+      if (actualText !== before) {
+        // Coba koreksi: cari kemunculan before terdekat
+        const idxExact = findNearestIndex(text, before, start);
+        if (idxExact !== -1) {
+          const newStart = idxExact;
+          const newEnd = idxExact + before.length;
+          console.warn('Adjusted offsets (exact match) from', { start, end }, 'to', { start: newStart, end: newEnd });
+          start = newStart;
+          end = newEnd;
+          actualText = text.slice(start, end);
+        } else {
+          // Coba case-insensitive dan set before ke teks asli
+          const idxCI = findNearestIndexCI(text, before, start);
+          if (idxCI !== -1) {
+            const newStart = idxCI;
+            const newEnd = idxCI + before.length;
+            const actual = text.slice(newStart, newEnd);
+            console.warn('Adjusted offsets (case-insensitive) from', { start, end }, 'to', { start: newStart, end: newEnd }, 'and normalized before to actual substring');
+            start = newStart;
+            end = newEnd;
+            before = actual; // samakan dengan teks asli agar konsumen downstream cocok
+            actualText = actual;
+          } else {
+            console.warn('Before text mismatch and could not auto-correct:', {
+              expected: before,
+              actual: actualText,
+              start,
+              end
+            });
+            continue; // skip jika benar-benar tidak dapat dipetakan
+          }
+        }
+      }
+
+      // Hindari overlap/duplikasi
+      if (overlaps(start, end)) {
+        console.warn('Overlapping suggestion skipped:', { start, end, before });
+        continue;
+      }
+
+      const fixed = {
+        ...suggestion,
+        start,
+        end,
+        before,
+      };
+
+      // Tambahkan ID jika belum ada
+      if (!fixed.id) {
+        fixed.id = `sg-${Date.now()}-${i}`;
+      }
+
+      takenRanges.push([start, end]);
+      processedSuggestions.push(fixed);
+
+      // Batasi maksimal 20 untuk keamanan
+      if (processedSuggestions.length >= 20) break;
     }
     
     return processedSuggestions;
@@ -294,64 +493,13 @@ RESTRICTIONS:
   }
 }
 
-// Validate suggestion object
-function validateSuggestion(suggestion, originalText) {
-  if (!suggestion || typeof suggestion !== 'object') {
-    return false;
-  }
-  
-  // Required fields
+// Validasi bentuk minimum suggestion (tanpa verifikasi posisi yang ketat dulu)
+function basicSuggestionShapeValid(suggestion) {
+  if (!suggestion || typeof suggestion !== 'object') return false;
   const requiredFields = ['category', 'message', 'before', 'after', 'start', 'end'];
   for (const field of requiredFields) {
-    if (!(field in suggestion)) {
-      console.warn(`Missing required field: ${field}`);
-      return false;
-    }
+    if (!(field in suggestion)) return false;
   }
-  
-  // Validate category
-  if (!['typo', 'eyd', 'konteks'].includes(suggestion.category)) {
-    console.warn('Invalid category:', suggestion.category);
-    return false;
-  }
-  
-  // Validate severity
-  if (suggestion.severity && !['low', 'medium', 'high'].includes(suggestion.severity)) {
-    console.warn('Invalid severity:', suggestion.severity);
-    return false;
-  }
-  
-  // Validate positions
-  if (typeof suggestion.start !== 'number' || typeof suggestion.end !== 'number') {
-    console.warn('Invalid start/end positions');
-    return false;
-  }
-  
-  if (suggestion.start < 0 || suggestion.end <= suggestion.start || suggestion.end > originalText.length) {
-    console.warn('Invalid position range:', suggestion.start, suggestion.end, originalText.length);
-    return false;
-  }
-  
-  // Validate that 'before' matches the text at the specified position
-  const actualText = originalText.slice(suggestion.start, suggestion.end);
-  if (actualText !== suggestion.before) {
-    console.warn('Before text mismatch:', {
-      expected: suggestion.before,
-      actual: actualText,
-      start: suggestion.start,
-      end: suggestion.end
-    });
-    return false;
-  }
-  
-  // Validate confidence
-  if (suggestion.confidence !== undefined) {
-    if (typeof suggestion.confidence !== 'number' || suggestion.confidence < 0 || suggestion.confidence > 1) {
-      console.warn('Invalid confidence value:', suggestion.confidence);
-      return false;
-    }
-  }
-  
   return true;
 }
 
