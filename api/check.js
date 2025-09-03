@@ -55,6 +55,9 @@ PERINTAH KHUSUS:
 - Severity: "low", "medium", "high"
 - JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI dalam suggestions
 - BATASI JUMLAH: Maksimal 20 saran per respons untuk menghindari JSON terpotong
+- JANGAN koreksi huruf kapital pada awal kalimat
+- JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
+- HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
 FORMAT OUTPUT JSON:
 {
@@ -323,6 +326,9 @@ ATURAN PENTING:
 - JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI
 - MAKSIMAL 20 saran untuk menghindari respons terpotong
 - Prioritaskan kesalahan yang paling mencolok
+- JANGAN koreksi huruf kapital pada awal kalimat
+- JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
+- HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
 PENTING - PENGHITUNGAN OFFSET:
 - Hitung posisi karakter dengan SANGAT TELITI
@@ -387,110 +393,129 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
   
   const content = data.choices[0].message.content;
   
+  // Parse with repair and strict-retry fallback
+  let parsed;
   try {
-    const parsed = JSON.parse(content);
+    parsed = tryParseJSONWithRepair(content);
+  } catch (parseErr) {
+    console.warn('Primary JSON parse failed, attempting strict retry...', parseErr?.message || parseErr);
+    const retryRaw = await strictRetryJSON(text);
+    if (!retryRaw) {
+      console.error('Strict retry returned empty content');
+      return [];
+    }
+    try {
+      parsed = tryParseJSONWithRepair(retryRaw);
+    } catch (retryErr) {
+      console.error('Strict retry JSON parse failed:', retryErr?.message || retryErr);
+      console.error('Raw content (primary):', content);
+      console.error('Raw content (retry):', retryRaw);
+      return [];
+    }
+  }
+
+  // Validate and process suggestions
+  const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+  const processedSuggestions = [];
+
+  // Untuk mencegah duplikasi/overlap
+  const takenRanges = [];
+  const overlaps = (s, e) => takenRanges.some(([ts, te]) => !(e <= ts || s >= te));
+
+  for (let i = 0; i < suggestions.length; i++) {
+    const suggestion = suggestions[i];
     
-    // Validate and process suggestions
-    const suggestions = parsed.suggestions || [];
-    const processedSuggestions = [];
+    // Cek struktur minimum
+    if (!basicSuggestionShapeValid(suggestion)) {
+      console.warn('Missing required field(s) on suggestion:', suggestion);
+      continue;
+    }
 
-    // Untuk mencegah duplikasi/overlap
-    const takenRanges = [];
-    const overlaps = (s, e) => takenRanges.some(([ts, te]) => !(e <= ts || s >= te));
+    // Validasi kategori/severity awal
+    if (!['typo', 'baku', 'eyd', 'konteks'].includes(suggestion.category)) {
+      console.warn('Invalid category:', suggestion.category);
+      continue;
+    }
+    if (suggestion.severity && !['low', 'medium', 'high'].includes(suggestion.severity)) {
+      console.warn('Invalid severity:', suggestion.severity);
+      continue;
+    }
 
-    for (let i = 0; i < suggestions.length; i++) {
-      const suggestion = suggestions[i];
-      
-      // Cek struktur minimum
-      if (!basicSuggestionShapeValid(suggestion)) {
-        console.warn('Missing required field(s) on suggestion:', suggestion);
-        continue;
-      }
+    let { start, end, before } = suggestion;
+    // Jaga batas
+    if (typeof start !== 'number') start = 0;
+    if (typeof end !== 'number') end = Math.min(text.length, (start || 0) + String(before || '').length);
+    start = Math.max(0, Math.min(start, text.length));
+    end = Math.max(start, Math.min(end, text.length));
 
-      // Validasi kategori/severity awal
-      if (!['typo', 'baku', 'eyd', 'konteks'].includes(suggestion.category)) {
-        console.warn('Invalid category:', suggestion.category);
-        continue;
-      }
-      if (suggestion.severity && !['low', 'medium', 'high'].includes(suggestion.severity)) {
-        console.warn('Invalid severity:', suggestion.severity);
-        continue;
-      }
-
-      let { start, end, before } = suggestion;
-      // Jaga batas
-      if (typeof start !== 'number') start = 0;
-      if (typeof end !== 'number') end = Math.min(text.length, (start || 0) + String(before || '').length);
-      start = Math.max(0, Math.min(start, text.length));
-      end = Math.max(start, Math.min(end, text.length));
-
-      let actualText = text.slice(start, end);
-      if (actualText !== before) {
-        // Coba koreksi: cari kemunculan before terdekat
-        const idxExact = findNearestIndex(text, before, start);
-        if (idxExact !== -1) {
-          const newStart = idxExact;
-          const newEnd = idxExact + before.length;
-          console.warn('Adjusted offsets (exact match) from', { start, end }, 'to', { start: newStart, end: newEnd });
+    let actualText = text.slice(start, end);
+    if (actualText !== before) {
+      // Coba koreksi: cari kemunculan before terdekat
+      const idxExact = findNearestIndex(text, before, start);
+      if (idxExact !== -1) {
+        const newStart = idxExact;
+        const newEnd = idxExact + String(before || '').length;
+        console.warn('Adjusted offsets (exact match) from', { start, end }, 'to', { start: newStart, end: newEnd });
+        start = newStart;
+        end = newEnd;
+        actualText = text.slice(start, end);
+      } else {
+        // Coba case-insensitive dan set before ke teks asli
+        const idxCI = findNearestIndexCI(text, before, start);
+        if (idxCI !== -1) {
+          const newStart = idxCI;
+          const newEnd = idxCI + String(before || '').length;
+          const actual = text.slice(newStart, newEnd);
+          console.warn('Adjusted offsets (case-insensitive) from', { start, end }, 'to', { start: newStart, end: newEnd }, 'and normalized before to actual substring');
           start = newStart;
           end = newEnd;
-          actualText = text.slice(start, end);
+          before = actual; // samakan dengan teks asli agar konsumen downstream cocok
+          actualText = actual;
         } else {
-          // Coba case-insensitive dan set before ke teks asli
-          const idxCI = findNearestIndexCI(text, before, start);
-          if (idxCI !== -1) {
-            const newStart = idxCI;
-            const newEnd = idxCI + before.length;
-            const actual = text.slice(newStart, newEnd);
-            console.warn('Adjusted offsets (case-insensitive) from', { start, end }, 'to', { start: newStart, end: newEnd }, 'and normalized before to actual substring');
-            start = newStart;
-            end = newEnd;
-            before = actual; // samakan dengan teks asli agar konsumen downstream cocok
-            actualText = actual;
-          } else {
-            console.warn('Before text mismatch and could not auto-correct:', {
-              expected: before,
-              actual: actualText,
-              start,
-              end
-            });
-            continue; // skip jika benar-benar tidak dapat dipetakan
-          }
+          console.warn('Before text mismatch and could not auto-correct:', {
+            expected: before,
+            actual: actualText,
+            start,
+            end
+          });
+          continue; // skip jika benar-benar tidak dapat dipetakan
         }
       }
-
-      // Hindari overlap/duplikasi
-      if (overlaps(start, end)) {
-        console.warn('Overlapping suggestion skipped:', { start, end, before });
-        continue;
-      }
-
-      const fixed = {
-        ...suggestion,
-        start,
-        end,
-        before,
-      };
-
-      // Tambahkan ID jika belum ada
-      if (!fixed.id) {
-        fixed.id = `sg-${Date.now()}-${i}`;
-      }
-
-      takenRanges.push([start, end]);
-      processedSuggestions.push(fixed);
-
-      // Batasi maksimal 20 untuk keamanan
-      if (processedSuggestions.length >= 20) break;
     }
-    
-    return processedSuggestions;
-    
-  } catch (parseError) {
-    console.error('Error parsing OpenAI response:', parseError);
-    console.error('Raw content:', content);
-    throw new Error('Invalid JSON response from OpenAI');
+
+    // Hindari overlap/duplikasi
+    if (overlaps(start, end)) {
+      console.warn('Overlapping suggestion skipped:', { start, end, before });
+      continue;
+    }
+
+    // Sanitasi field string untuk menghindari karakter tidak valid/bermasalah
+    const sanitizedMessage = sanitizeString(String(suggestion.message), 200);
+    let afterVal = typeof suggestion.after === 'string' ? suggestion.after : String(suggestion.after ?? '');
+    afterVal = sanitizeString(afterVal, 100);
+
+    const fixed = {
+      ...suggestion,
+      start,
+      end,
+      before: actualText, // pakai substring asli untuk memastikan kecocokan
+      after: afterVal,
+      message: sanitizedMessage,
+    };
+
+    // Tambahkan ID jika belum ada
+    if (!fixed.id) {
+      fixed.id = `sg-${Date.now()}-${i}`;
+    }
+
+    takenRanges.push([start, end]);
+    processedSuggestions.push(fixed);
+
+    // Batasi maksimal 20 untuk keamanan
+    if (processedSuggestions.length >= 20) break;
   }
+  
+  return processedSuggestions;
 }
 
 // Validasi bentuk minimum suggestion (tanpa verifikasi posisi yang ketat dulu)
@@ -501,6 +526,93 @@ function basicSuggestionShapeValid(suggestion) {
     if (!(field in suggestion)) return false;
   }
   return true;
+}
+
+// Parsing helper dengan "JSON repair" ringan
+function tryParseJSONWithRepair(content) {
+  // Coba parse langsung
+  try {
+    return JSON.parse(content);
+  } catch (_) {
+    // Lanjut ke perbaikan ringan
+  }
+  
+  const block = extractJSONBlock(content);
+  if (block) {
+    return JSON.parse(block);
+  }
+  
+  // Gagal total
+  throw new Error('Unable to parse JSON (even after repair)');
+}
+
+// Ekstrak blok JSON terluar dengan pencocokan kurung kurawal
+function extractJSONBlock(str) {
+  if (!str) return null;
+  const start = str.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return str.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+// Retry ketat untuk meminta JSON valid saja
+async function strictRetryJSON(text) {
+  try {
+    const strictResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CONFIG.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: CONFIG.OPENAI_MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: `${text}\n\nPENTING: Keluarkan JSON VALID SAJA sesuai skema (tanpa teks lain). Jika ragu, kembalikan {\"suggestions\": []}.` }
+        ],
+        temperature: 0,
+        max_tokens: 2000,
+        response_format: { type: 'json_object' }
+      })
+    });
+    if (!strictResponse.ok) {
+      const err = await strictResponse.text();
+      console.error('Strict retry API error:', strictResponse.status, err);
+      return null;
+    }
+    const data = await strictResponse.json();
+    const content = data?.choices?.[0]?.message?.content;
+    return content || null;
+  } catch (e) {
+    console.error('Strict retry request failed:', e);
+    return null;
+  }
+}
+
+// Sanitasi string: hapus karakter kontrol, trimming, dan batasi panjang
+function sanitizeString(input, maxLen) {
+  try {
+    let s = String(input ?? '');
+    // Hapus karakter kontrol non-whitespace standar
+    s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    if (typeof maxLen === 'number' && maxLen > 0 && s.length > maxLen) {
+      s = s.slice(0, maxLen);
+    }
+    return s;
+  } catch {
+    return '';
+  }
 }
 
 // Cleanup old rate limit entries periodically
