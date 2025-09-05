@@ -59,7 +59,10 @@ PERINTAH KHUSUS:
 - JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI dalam suggestions
 - BATASI JUMLAH: Maksimal 20 saran per respons untuk menghindari JSON terpotong
 - JANGAN koreksi huruf kapital pada awal kalimat
+- Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
+- JANGAN mengoreksi teks dengan format "NAMA KOTA, KOMPAS" seperti "JAKARTA, KOMPAS", "YOGYAKARTA, KOMPAS", "BANDUNG, KOMPAS"
+- JANGAN mengoreksi tidak adanya spasi antar kata
 - HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
 FORMAT OUTPUT JSON:
