@@ -10,11 +10,14 @@ const rateLimitStore = new Map();
 const CONFIG = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   OPENAI_MODEL: 'gpt-4o-mini',
+  // Upstash / Vercel KV REST (gunakan token write)
+  KV_REST_API_URL: process.env.KV_REST_API_URL,
+  KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
   RATE_LIMIT: {
     maxRequests: 10,
     windowMs: 60000 // 1 menit
   },
-  MAX_TEXT_LENGTH: 10000,
+  MAX_TEXT_LENGTH: 12000,
   ALLOWED_ORIGINS: [
     'chrome-extension://',
     'moz-extension://',
@@ -104,7 +107,7 @@ export default async function handler(req, res) {
     
     // Rate limiting
     const clientId = getClientId(req);
-    if (!checkRateLimit(clientId)) {
+    if (!(await checkRateLimit(clientId))) {
       return res.status(429).json({
         error: 'Rate limit exceeded',
         message: 'Terlalu banyak permintaan. Silakan coba lagi nanti.'
@@ -186,8 +189,57 @@ export default async function handler(req, res) {
   }
 }
 
-// Rate limiting check
-function checkRateLimit(clientId) {
+// Rate limiting check (delegator)
+async function checkRateLimit(clientId) {
+  // Jika konfigurasi Upstash tersedia, gunakan Upstash terlebih dahulu
+  if (CONFIG.KV_REST_API_URL && CONFIG.KV_REST_API_TOKEN) {
+    try {
+      return await checkRateLimitUpstash(clientId);
+    } catch (err) {
+      console.warn('Rate limit via Upstash gagal, fallback ke in-memory:', err?.message || err);
+      // lanjut fallback
+    }
+  }
+  // Fallback ke in-memory agar tidak mengganggu fungsi lain
+  return checkRateLimitInMemory(clientId);
+}
+
+// Implementasi rate limit via Upstash Redis REST (fixed window + TTL)
+async function checkRateLimitUpstash(clientId) {
+  const ttlSec = Math.ceil(CONFIG.RATE_LIMIT.windowMs / 1000);
+  const key = `periksakata:rl:${clientId}`;
+
+  const url = `${CONFIG.KV_REST_API_URL.replace(/\/$/, '')}/pipeline`;
+  const commands = [
+    ["INCR", key],
+    ["EXPIRE", key, ttlSec, "NX"] // set expiry hanya jika belum ada
+  ];
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${CONFIG.KV_REST_API_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(commands)
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Upstash REST error: ${resp.status} ${text}`);
+  }
+
+  const results = await resp.json();
+  // results contoh: [{result: 1}, {result: 1}]
+  const incr = Number(results?.[0]?.result ?? 0);
+  if (!Number.isFinite(incr)) {
+    throw new Error('Invalid INCR result from Upstash');
+  }
+  return incr <= CONFIG.RATE_LIMIT.maxRequests;
+}
+
+// Rate limiting check - in-memory (fallback)
+function checkRateLimitInMemory(clientId) {
   const now = Date.now();
   const requests = rateLimitStore.get(clientId) || [];
   
