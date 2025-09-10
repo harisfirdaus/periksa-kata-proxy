@@ -62,6 +62,11 @@ PERINTAH KHUSUS:
 - Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
 - JANGAN mengoreksi teks dengan format "NAMA KOTA, KOMPAS" seperti "JAKARTA, KOMPAS", "YOGYAKARTA, KOMPAS", "BANDUNG, KOMPAS"
+- Termasuk variasi byline di AWAL paragraf/kalimat: biarkan persis apa adanya, termasuk tanda baca setelahnya (koma, em dash/dash, titik dua, atau koma lanjutan)
+- Contoh yang BENAR (JANGAN dikoreksi): "YOGYAKARTA, KOMPAS —", "JAKARTA, KOMPAS:", "Bandung, KOMPAS,"
+- Jangan usulkan perubahan pada kata "KOMPAS" (brand) atau nama kota di pola tersebut, termasuk kapitalisasi
+- DILARANG mengeluarkan saran yang nilai 'after' identik dengan 'before'. Jika tidak ada perubahan nyata, ABAIKAN saran tersebut
+- Jika tidak ada kesalahan nyata, kembalikan JSON dengan "suggestions": []
 - JANGAN mengoreksi tidak adanya spasi antar kata
 - HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
@@ -383,6 +388,8 @@ ATURAN PENTING:
 - Prioritaskan kesalahan yang paling mencolok
 - JANGAN koreksi huruf kapital pada awal kalimat
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
+- JANGAN mengoreksi format byline "NAMA KOTA, KOMPAS" di awal paragraf/kalimat (contoh: "YOGYAKARTA, KOMPAS —", "JAKARTA, KOMPAS:", "Bandung, KOMPAS,")
+- DILARANG mengeluarkan saran yang nilai 'after' identik dengan 'before' (jika tidak ada perubahan nyata, abaikan)
 - HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
 PENTING - PENGHITUNGAN OFFSET:
