@@ -50,7 +50,6 @@ const SYSTEM_PROMPT = `Kamu adalah pemeriksa bahasa Indonesia yang ahli. Tugas k
 
 PERINTAH KHUSUS:
 - Periksa SETIAP kata dalam teks, jangan lewatkan kesalahan yang mencolok
-- WAJIB DETEKSI: Kata seperti "sya", "mkn", "enk", "tdk", "slh" adalah kesalahan PASTI yang harus dideteksi
 - Scan SELURUH kalimat: Jangan berhenti setelah menemukan beberapa kesalahan, lanjutkan sampai akhir
 - Berikan confidence tinggi (0.8-0.95) untuk kesalahan yang jelas
 - Offsets: start = index karakter awal, end = index karakter setelah akhir (exclusive)
@@ -706,7 +705,8 @@ function sanitizeString(input, maxLen) {
 // Cleanup old rate limit entries periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [clientId, requests] of rateLimitStore.entries()) {
+  for (const [clientId,
+     requests] of rateLimitStore.entries()) {
     const validRequests = requests.filter(time => now - time < CONFIG.RATE_LIMIT.windowMs);
     if (validRequests.length === 0) {
       rateLimitStore.delete(clientId);
