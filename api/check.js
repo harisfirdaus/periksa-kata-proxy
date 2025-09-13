@@ -62,9 +62,11 @@ PERINTAH KHUSUS:
 - Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
 - JANGAN mengoreksi teks dengan format "NAMA KOTA, KOMPAS" seperti "JAKARTA, KOMPAS", "YOGYAKARTA, KOMPAS", "BANDUNG, KOMPAS"
-- Termasuk variasi byline di AWAL paragraf/kalimat: biarkan persis apa adanya, termasuk tanda baca setelahnya (koma, em dash/dash, titik dua, atau koma lanjutan)
+- Untuk variasi byline di AWAL paragraf/kalimat: biarkan persis apa adanya, termasuk tanda baca setelahnya (koma, em dash/dash, titik dua, atau koma lanjutan)
 - Contoh yang BENAR (JANGAN dikoreksi): "YOGYAKARTA, KOMPAS —", "JAKARTA, KOMPAS:", "Bandung, KOMPAS,"
 - Jangan usulkan perubahan pada kata "KOMPAS" (brand) atau nama kota di pola tersebut, termasuk kapitalisasi
+- JANGAN mengoreksi kredit foto/atribusi media dengan pola "KOMPAS/NAMA" (contoh: "KOMPAS/PRIYOMBODO", "KOMPAS/RIZA FATHONI", termasuk variasi kapitalisasi). Biarkan persis, jangan ubah kapitalisasi, spasi, atau tanda "/".
+- Jangan menambahkan spasi di sekitar "/" pada kredit foto (contoh: jangan ubah "KOMPAS/RIZA FATHONI" menjadi "KOMPAS / RIZA FATHONI").
 - DILARANG mengeluarkan saran yang nilai 'after' identik dengan 'before'. Jika tidak ada perubahan nyata, ABAIKAN saran tersebut
 - Jika tidak ada kesalahan nyata, kembalikan JSON dengan "suggestions": []
 - JANGAN mengoreksi tidak adanya spasi antar kata
@@ -389,6 +391,7 @@ ATURAN PENTING:
 - JANGAN koreksi huruf kapital pada awal kalimat
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
 - JANGAN mengoreksi format byline "NAMA KOTA, KOMPAS" di awal paragraf/kalimat (contoh: "YOGYAKARTA, KOMPAS —", "JAKARTA, KOMPAS:", "Bandung, KOMPAS,")
+- JANGAN menyentuh kredit foto "KOMPAS/NAMA" dan jangan menambah spasi di sekitar "/".
 - DILARANG mengeluarkan saran yang nilai 'after' identik dengan 'before' (jika tidak ada perubahan nyata, abaikan)
 - HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
@@ -555,6 +558,29 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
     const sanitizedMessage = sanitizeString(String(suggestion.message), 200);
     let afterVal = typeof suggestion.after === 'string' ? suggestion.after : String(suggestion.after ?? '');
     afterVal = sanitizeString(afterVal, 100);
+
+    // Guards pascaproses: abaikan saran yang tidak mengubah apa pun
+    const normalizeNFC = (s) => (s ?? '').normalize('NFC');
+    // 1) after kosong/whitespace-only → skip
+    if (!afterVal || afterVal.trim().length === 0) {
+      console.warn('Empty/whitespace-only after skipped:', { before: actualText, after: afterVal });
+      continue;
+    }
+    // 2) Sama persis → skip
+    if (afterVal === actualText) {
+      console.warn('No-op suggestion skipped (exact equal):', { before: actualText, after: afterVal });
+      continue;
+    }
+    // 3) Sama jika di-trim (hanya beda spasi di tepi) → skip
+    if (afterVal.trim() === actualText.trim()) {
+      console.warn('No-op suggestion skipped (trim equal):', { before: actualText, after: afterVal });
+      continue;
+    }
+    // 4) Sama setelah normalisasi Unicode NFC → skip
+    if (normalizeNFC(afterVal) === normalizeNFC(actualText)) {
+      console.warn('No-op suggestion skipped (NFC equal):', { before: actualText, after: afterVal });
+      continue;
+    }
 
     const fixed = {
       ...suggestion,
