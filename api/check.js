@@ -55,7 +55,6 @@ PERINTAH KHUSUS:
 - Offsets: start = index karakter awal, end = index karakter setelah akhir (exclusive)
 - Kategori: "typo", "baku", "eyd", "konteks"
 - Severity: "low", "medium", "high"
-- JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI dalam suggestions
 - BATASI JUMLAH: Maksimal 20 saran per respons untuk menghindari JSON terpotong
 - JANGAN koreksi huruf kapital pada awal kalimat
 - Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
@@ -384,7 +383,6 @@ Cari dengan teliti:
 ✓ Konteks: kata benar ejaan tapi salah makna
 
 ATURAN PENTING:
-- JANGAN DUPLIKASI: Setiap kata yang salah hanya boleh muncul SEKALI
 - MAKSIMAL 20 saran untuk menghindari respons terpotong
 - Prioritaskan kesalahan yang paling mencolok
 - JANGAN koreksi huruf kapital pada awal kalimat
