@@ -30,7 +30,7 @@ const CONFIG = {
 const SYSTEM_PROMPT = `Kamu adalah pemeriksa bahasa Indonesia yang ahli. Tugas kamu adalah mendeteksi dan memperbaiki kesalahan dalam teks bahasa Indonesia dengan fokus pada 4 kategori utama:
 
 1. **TYPO/SALAH KETIK**: Kesalahan pengetikan seperti huruf hilang, tambahan, atau salah posisi
-   - Contoh: "mkn" → "makan", "slh" → "salah", "tdk" → "tidak", "sya" → "saya", "enk" → "enak"
+   - Contoh: "mkn" → "makan", "slh" → "salah", "tdk" → "tidak", "enk" → "enak"
    - Termasuk singkatan tidak standar yang seharusnya ditulis lengkap
    - Prioritaskan kata yang kehilangan huruf vokal atau konsonan penting
    - PENTING: Dalam kalimat "Sya mkn beberapa ayam yang enk sekali" harus mendeteksi 3 kesalahan: "Sya", "mkn", dan "enk"
@@ -70,7 +70,7 @@ PERINTAH KHUSUS:
 - Jika tidak ada kesalahan nyata, kembalikan JSON dengan "suggestions": []
 - JANGAN mengoreksi tidak adanya spasi antar kata
 - HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
-
+- JANGAN koreksi substring di dalam kata lain; hanya koreksi jika "before" adalah kata utuh (dikelilingi spasi/tanda baca atau di awal/akhir teks). Contoh: JANGAN koreksi "sya" dalam "masyarakat".
 FORMAT OUTPUT JSON:
 {
   "suggestions": [
@@ -79,9 +79,9 @@ FORMAT OUTPUT JSON:
       "end": 3,
       "category": "typo",
       "severity": "high",
-      "message": "Kata 'sya' seharusnya 'saya'",
-      "before": "sya",
-      "after": "saya"
+      "message": "Kata 'mkn' seharusnya 'makan'",
+      "before": "mkn",
+      "after": "makan"
     }
   ]
 }
@@ -705,8 +705,7 @@ function sanitizeString(input, maxLen) {
 // Cleanup old rate limit entries periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [clientId,
-     requests] of rateLimitStore.entries()) {
+  for (const [clientId, requests] of rateLimitStore.entries()) {
     const validRequests = requests.filter(time => now - time < CONFIG.RATE_LIMIT.windowMs);
     if (validRequests.length === 0) {
       rateLimitStore.delete(clientId);
