@@ -55,7 +55,14 @@ PERINTAH KHUSUS:
 - Offsets: start = index karakter awal, end = index karakter setelah akhir (exclusive)
 - Kategori: "typo", "baku", "eyd", "konteks"
 - Severity: "low", "medium", "high"
-- BATASI JUMLAH: Maksimal 20 saran per respons untuk menghindari JSON terpotong
+
+PENTING - SCAN SELURUH TEKS DAN KEMBALIKAN SEMUA KEMUNCULAN:
+- Periksa SETIAP kata dalam teks dari awal hingga akhir
+- Jika kata yang SALAH muncul LEBIH DARI SATU KALI di posisi berbeda, WAJIB kembalikan saran TERPISAH untuk SETIAP kemunculan
+- Setiap suggestion harus punya offset (start, end) yang AKURAT sesuai posisi kata di teks
+- Contoh: Jika "Philipina" ada di posisi 100, 500, 900, 1200 → kembalikan 4 suggestions dengan offset berbeda
+
+- BATASI JUMLAH: Maksimal 30 saran per respons untuk menghindari JSON terpotong
 - JANGAN koreksi huruf kapital pada awal kalimat
 - Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
@@ -431,7 +438,7 @@ Cari dengan teliti:
 ✓ Konteks: kata benar ejaan tapi salah makna
 
 ATURAN PENTING:
-- MAKSIMAL 20 saran untuk menghindari respons terpotong
+- MAKSIMAL 30 saran untuk menghindari respons terpotong
 - Prioritaskan kesalahan yang paling mencolok
 - JANGAN koreksi huruf kapital pada awal kalimat
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
@@ -484,7 +491,7 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
         }
       ],
       temperature: 0.1,
-      max_tokens: 2000,
+      max_tokens: 3500,
       response_format: { type: 'json_object' }
     })
   });
@@ -644,8 +651,8 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
     takenRanges.push([start, end]);
     processedSuggestions.push(fixed);
 
-    // Batasi maksimal 20 untuk keamanan
-    if (processedSuggestions.length >= 20) break;
+    // Batasi maksimal 30 untuk keamanan
+    if (processedSuggestions.length >= 30) break;
   }
   
   return processedSuggestions;
@@ -714,7 +721,7 @@ async function strictRetryJSON(text) {
           { role: 'user', content: `${text}\n\nPENTING: Keluarkan JSON VALID SAJA sesuai skema (tanpa teks lain). Jika ragu, kembalikan {\"suggestions\": []}.` }
         ],
         temperature: 0,
-        max_tokens: 2000,
+        max_tokens: 3500,
         response_format: { type: 'json_object' }
       })
     });
