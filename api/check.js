@@ -55,7 +55,14 @@ PERINTAH KHUSUS:
 - Offsets: start = index karakter awal, end = index karakter setelah akhir (exclusive)
 - Kategori: "typo", "baku", "eyd", "konteks"
 - Severity: "low", "medium", "high"
-- BATASI JUMLAH: Maksimal 20 saran per respons untuk menghindari JSON terpotong
+
+PENTING - SCAN SELURUH TEKS DAN KEMBALIKAN SEMUA KEMUNCULAN:
+- Periksa SETIAP kata dalam teks dari awal hingga akhir
+- Jika kata yang SALAH muncul LEBIH DARI SATU KALI di posisi berbeda, WAJIB kembalikan saran TERPISAH untuk SETIAP kemunculan
+- Setiap suggestion harus punya offset (start, end) yang AKURAT sesuai posisi kata di teks
+- Contoh: Jika "Philipina" ada di posisi 100, 500, 900, 1200 → kembalikan 4 suggestions dengan offset berbeda
+
+- BATASI JUMLAH: Maksimal 30 saran per respons untuk menghindari JSON terpotong
 - JANGAN koreksi huruf kapital pada awal kalimat
 - Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
@@ -86,9 +93,43 @@ FORMAT OUTPUT JSON:
 }
 
 - Jangan menulis penjelasan di luar JSON
-- WAJIB gunakan format JSON di atas dengan field: start, end, category, severity, message, before, after`;
+- WAJIB gunakan format JSON di atas dengan field: start, end, category, severity, message, before, after
 
-// Main handler
+**PEDOMAN KATA BAKU KOMPAS** (PRIORITAS TINGGI - confidence 0.95):
+Jika menemukan kata-kata berikut, WAJIB koreksi dengan confidence tinggi:
+- "ijin" → "izin"
+- "aktifitas" → "aktivitas"
+- "resiko" → "risiko"
+- "analisa" → "analisis"
+- "apotik" → "apotek"
+- "nasehat" → "nasihat"
+- "praktek" → "praktik"
+- "propinsi" → "provinsi"
+- "obyek" / "subyek" → "objek" / "subjek"
+- "kwalitas" / "kwantitas" → "kualitas" / "kuantitas"
+- "methode" → "metode"
+- "tehnik" / "tekhnik" → "teknik"
+- "standart" → "standar"
+- "jaman" → "zaman"
+- "karir" → "karier"
+- "detil" → "detail"
+- "bis" → "bus" (kecuali "bis surat")
+- "cabe" → "cabai"
+- "konkrit" → "konkret"
+- "komplek" → "kompleks"
+
+**NAMA NEGARA KOMPAS** (PRIORITAS TINGGI - confidence 0.95):
+- "Cina" / "Tiongkok" → "China"
+- "Prancis" → "Perancis"
+- "Hongkong" → "Hong Kong"
+- "Islandia" → "Eslandia"
+- "Gana" → "Ghana"
+- "Libia" → "Libya"
+- "Rumania" → "Romania"
+- "Afganistan" → "Afghanistan"
+- "Butan" → "Bhutan"
+- "Jibuti" → "Djibouti"
+- "Yordania" → "Jordania"`;
 export default async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -139,7 +180,7 @@ export default async function handler(req, res) {
       });
     }
     
-    const { text } = requestData;
+    const { text, kompasContext } = requestData;
     
     // Create text fingerprint
     const textFingerprint = createTextFingerprint(text);
@@ -147,6 +188,9 @@ export default async function handler(req, res) {
     // Call OpenAI API
     console.log('Calling OpenAI API with text:', text.substring(0, 100) + '...');
     console.log('Text length:', text.length, 'characters');
+    if (kompasContext && kompasContext.length > 0) {
+      console.log('Kompas context:', kompasContext.length, 'issues');
+    }
     
     let didCallLLM = false;
     let skippedReason = null;
@@ -154,7 +198,7 @@ export default async function handler(req, res) {
     
     try {
       didCallLLM = true;
-      suggestions = await checkTextWithOpenAI(text);
+      suggestions = await checkTextWithOpenAI(text, kompasContext);
       console.log('OpenAI API returned suggestions:', suggestions.length);
       
       if (suggestions.length === 0) {
@@ -371,7 +415,18 @@ function findNearestIndexCI(haystack, needle, approxIndex) {
 }
 
 // Call OpenAI API
-async function checkTextWithOpenAI(text) {
+async function checkTextWithOpenAI(text, kompasContext = []) {
+  // Build system prompt with Kompas context injection
+  let systemPrompt = SYSTEM_PROMPT;
+  
+  if (kompasContext && kompasContext.length > 0) {
+    systemPrompt += `\n\n⚠️ PENTING - Aturan Gaya Kompas (SUDAH DIKOREKSI):\nKata-kata berikut SUDAH diperbaiki sesuai style guide Kompas. JANGAN koreksi ulang:\n`;
+    kompasContext.forEach(issue => {
+      systemPrompt += `- "${issue.word}" → "${issue.correction}" (${issue.message})\n`;
+    });
+    systemPrompt += `\nFokus HANYA pada kesalahan LAIN yang belum tercakup di atas.`;
+  }
+  
   const userPrompt = `Periksa teks berikut dan temukan SEMUA kesalahan ejaan, typo, EYD, dan konteks:
 
 "${text}"
@@ -383,7 +438,7 @@ Cari dengan teliti:
 ✓ Konteks: kata benar ejaan tapi salah makna
 
 ATURAN PENTING:
-- MAKSIMAL 20 saran untuk menghindari respons terpotong
+- MAKSIMAL 30 saran untuk menghindari respons terpotong
 - Prioritaskan kesalahan yang paling mencolok
 - JANGAN koreksi huruf kapital pada awal kalimat
 - JANGAN mengubah kapitalisasi nama orang/tempat/lembaga, akronim/brand, dan format tanggal yang benar
@@ -428,7 +483,7 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
       messages: [
         {
           role: 'system',
-          content: SYSTEM_PROMPT
+          content: systemPrompt
         },
         {
           role: 'user',
@@ -436,7 +491,7 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
         }
       ],
       temperature: 0.1,
-      max_tokens: 2000,
+      max_tokens: 3500,
       response_format: { type: 'json_object' }
     })
   });
@@ -596,8 +651,8 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
     takenRanges.push([start, end]);
     processedSuggestions.push(fixed);
 
-    // Batasi maksimal 20 untuk keamanan
-    if (processedSuggestions.length >= 20) break;
+    // Batasi maksimal 30 untuk keamanan
+    if (processedSuggestions.length >= 30) break;
   }
   
   return processedSuggestions;
@@ -666,7 +721,7 @@ async function strictRetryJSON(text) {
           { role: 'user', content: `${text}\n\nPENTING: Keluarkan JSON VALID SAJA sesuai skema (tanpa teks lain). Jika ragu, kembalikan {\"suggestions\": []}.` }
         ],
         temperature: 0,
-        max_tokens: 2000,
+        max_tokens: 3500,
         response_format: { type: 'json_object' }
       })
     });
