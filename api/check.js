@@ -96,40 +96,28 @@ FORMAT OUTPUT JSON:
 - WAJIB gunakan format JSON di atas dengan field: category, severity, message, before, after
 - TIDAK PERLU field: start, end (client akan mencari posisi otomatis)
 
-**PEDOMAN KATA BAKU KOMPAS** (PRIORITAS TINGGI - confidence 0.95):
-Jika menemukan kata-kata berikut, WAJIB koreksi dengan confidence tinggi:
-- "ijin" → "izin"
-- "aktifitas" → "aktivitas"
-- "resiko" → "risiko"
-- "analisa" → "analisis"
-- "apotik" → "apotek"
-- "nasehat" → "nasihat"
-- "praktek" → "praktik"
-- "propinsi" → "provinsi"
-- "obyek" / "subyek" → "objek" / "subjek"
-- "kwalitas" / "kwantitas" → "kualitas" / "kuantitas"
-- "methode" → "metode"
-- "tehnik" / "tekhnik" → "teknik"
-- "standart" → "standar"
-- "jaman" → "zaman"
-- "karir" → "karier"
-- "detil" → "detail"
-- "cabe" → "cabai"
-- "konkrit" → "konkret"
-- "komplek" → "kompleks"
+**REFERENSI KATA BAKU KOMPAS**:
+List berikut HANYA sebagai referensi. JANGAN generate saran untuk kata yang tidak ada di teks.
 
-**NAMA NEGARA KOMPAS** (PRIORITAS TINGGI - confidence 0.95):
-- "Cina" / "Tiongkok" → "China"
-- "Prancis" → "Perancis"
-- "Hongkong" → "Hong Kong"
-- "Islandia" → "Eslandia"
-- "Gana" → "Ghana"
-- "Libia" → "Libya"
-- "Rumania" → "Romania"
-- "Afganistan" → "Afghanistan"
-- "Butan" → "Bhutan"
-- "Jibuti" → "Djibouti"
-- "Yordania" → "Jordania"`;
+Kata tidak baku yang umum (koreksi HANYA jika ditemukan di teks):
+ijin→izin, aktifitas→aktivitas, resiko→risiko, analisa→analisis, apotik→apotek, nasehat→nasihat, praktek→praktik, propinsi→provinsi, obyek→objek, subyek→subjek, kwalitas→kualitas, kwantitas→kuantitas, methode→metode, tehnik→teknik, tekhnik→teknik, standart→standar, jaman→zaman, karir→karier, detil→detail, cabe→cabai, konkrit→konkret, komplek→kompleks
+
+CARA GUNAKAN REFERENSI:
+1. Baca teks yang diberikan dengan teliti
+2. HANYA jika kata di atas ditemukan di teks, berikan saran koreksi
+3. JANGAN generate saran untuk kata yang tidak ada di teks
+4. List ini bukan checklist - jangan paksa mencari kata-kata ini
+
+**REFERENSI NAMA NEGARA KOMPAS**:
+List berikut HANYA sebagai referensi. JANGAN generate saran untuk nama negara yang tidak ada di teks.
+
+Nama negara yang sering salah (koreksi HANYA jika ditemukan di teks):
+Cina→China, Tiongkok→China, Prancis→Perancis, Hongkong→Hong Kong, Islandia→Eslandia, Gana→Ghana, Libia→Libya, Rumania→Romania, Afganistan→Afghanistan, Butan→Bhutan, Jibuti→Djibouti, Yordania→Jordania
+
+CARA GUNAKAN REFERENSI:
+1. HANYA jika nama negara di atas ditemukan di teks, berikan saran koreksi
+2. JANGAN generate saran untuk nama negara yang tidak ada di teks
+3. List ini bukan checklist - jangan paksa mencari nama negara ini`
 export default async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
