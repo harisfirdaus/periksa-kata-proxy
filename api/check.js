@@ -56,13 +56,14 @@ PERINTAH KHUSUS:
 - Kategori: "typo", "baku", "eyd", "konteks"
 - Severity: "low", "medium", "high"
 
-PENTING - SCAN SELURUH TEKS DAN KEMBALIKAN SEMUA KEMUNCULAN:
+PENTING - PENANGANAN KATA BERULANG:
 - Periksa SETIAP kata dalam teks dari awal hingga akhir
-- Jika kata yang SALAH muncul LEBIH DARI SATU KALI di posisi berbeda, WAJIB kembalikan saran TERPISAH untuk SETIAP kemunculan
-- Setiap suggestion harus punya offset (start, end) yang AKURAT sesuai posisi kata di teks
-- Contoh: Jika "Philipina" ada di posisi 100, 500, 900, 1200 → kembalikan 4 suggestions dengan offset berbeda
+- Jika kata yang SAMA (misal 'makn') muncul BEBERAPA KALI di teks, kembalikan HANYA 1 suggestion dengan before='makn' dan after='makan'
+- JANGAN calculate posisi (start/end) dari kata tersebut - Client akan mencari posisi secara otomatis
+- JANGAN return multiple suggestions untuk kata yang identik sama
+- Contoh: jika 'makn' ada 5x, return 1x saja: {before:'makn', after:'makan'}
 
-- BATASI JUMLAH: Maksimal 30 saran per respons untuk menghindari JSON terpotong
+- BATASI JUMLAH: Maksimal 30 saran UNIK per respons untuk menghindari JSON terpotong
 - JANGAN koreksi huruf kapital pada awal kalimat
 - Jika kata yang salah menggunakan huruf kapital di awal, maka kata yang disarankan juga harus memakai huruf kapital di awal 
 - JANGAN mengubah kapitalisasi kata umum di tengah kalimat; pertahankan huruf kecil kecuali (a) awal kalimat, (b) nama diri/lembaga/tempat, (c) akronim/brand, atau (d) aturan ejaan khusus yang eksplisit.
@@ -82,8 +83,6 @@ FORMAT OUTPUT JSON:
 {
   "suggestions": [
     {
-      "start": 0,
-      "end": 3,
       "category": "typo",
       "severity": "high",
       "message": "Kata 'mkn' seharusnya 'makan'",
@@ -94,7 +93,8 @@ FORMAT OUTPUT JSON:
 }
 
 - Jangan menulis penjelasan di luar JSON
-- WAJIB gunakan format JSON di atas dengan field: start, end, category, severity, message, before, after
+- WAJIB gunakan format JSON di atas dengan field: category, severity, message, before, after
+- TIDAK PERLU field: start, end (client akan mencari posisi otomatis)
 
 **PEDOMAN KATA BAKU KOMPAS** (PRIORITAS TINGGI - confidence 0.95):
 Jika menemukan kata-kata berikut, WAJIB koreksi dengan confidence tinggi:
@@ -447,30 +447,28 @@ ATURAN PENTING:
 - DILARANG mengeluarkan saran yang nilai 'after' identik dengan 'before' (jika tidak ada perubahan nyata, abaikan)
 - HANYA kembalikan saran jika nilai 'before' benar-benar muncul persis (exact substring, case sensitive) di dalam teks segmen yang diberikan. Jika tidak ada, JANGAN keluarkan saran tersebut
 
-PENTING - PENGHITUNGAN OFFSET:
-- Hitung posisi karakter dengan SANGAT TELITI
-- start = index karakter pertama dari kata yang salah
-- end = index karakter setelah kata yang salah (exclusive)
-- Field 'before' HARUS sama persis dengan teks di posisi start-end (CASE SENSITIVE)
-- Pertahankan kapitalisasi asli: jika teks asli 'Sya' maka before: 'Sya', bukan 'sya'
+PENTING - FORMAT SARAN:
+- Field 'before' HARUS kata/frasa yang persis muncul di teks (CASE SENSITIVE satu contoh)
+- Pertahankan kapitalisasi dari salah satu contoh di teks: jika ada 'Sya' dan 'sya', pilih salah satu (misal 'Sya')
 - Jangan sertakan spasi di awal/akhir kecuali memang bagian dari kesalahan
+- TIDAK PERLU calculate posisi (start/end) - client akan mencari otomatis
+- Fokus pada identifikasi kata yang salah dan koreksinya
 
-Contoh untuk "Ini adalah demnstrasi":
-- Kata "demnstrasi" dimulai di index 11, berakhir di index 21
-- before: "demnstrasi" (tanpa spasi)
+Contoh untuk "Ini adalah demnstrasi yang demnstrasi sekali":
+- before: "demnstrasi" (kata yang salah, muncul 2x)
 - after: "demonstrasi"
+- Return HANYA 1 suggestion (client akan find 2 positions)
 
-Contoh untuk "Sya mkn ayam":
-- Kata "Sya" dimulai di index 0, berakhir di index 3
-- before: "Sya" (dengan huruf besar S, sesuai teks asli)
-- after: "Saya"
+Contoh untuk "Sya mkn ayam. sya juga mkn nasi":
+- Suggestion 1: before: "Sya", after: "Saya" (ambil case dari salah satu kemunculan)
+- Suggestion 2: before: "mkn", after: "makan" (muncul 2x, return 1x saja)
 
-Contoh untuk "Makanan ini enk sekali":
-- Kata "enk" dimulai di index 12, berakhir di index 15
-- before: "enk" (kata singkatan tidak baku)
+Contoh untuk "Makanan ini enk sekali. Rasanya enk":
+- before: "enk" (kata singkatan, muncul 2x)
 - after: "enak"
+- Return HANYA 1 suggestion
 
-Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
+Kembalikan JSON dengan format yang tepat, fokus pada unique errors.`
   
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -532,23 +530,24 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
   }
 
   // Validate and process suggestions
-  const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+  let suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+  
+  // Deduplication: remove duplicate suggestions (same before + after)
+  suggestions = deduplicateSuggestions(suggestions);
+  console.log('[info] Suggestions after dedup:', suggestions.length);
+  
   const processedSuggestions = [];
-
-  // Untuk mencegah duplikasi/overlap
-  const takenRanges = [];
-  const overlaps = (s, e) => takenRanges.some(([ts, te]) => !(e <= ts || s >= te));
 
   for (let i = 0; i < suggestions.length; i++) {
     const suggestion = suggestions[i];
     
-    // Cek struktur minimum
-    if (!basicSuggestionShapeValid(suggestion)) {
+    // Cek struktur minimum (tanpa position)
+    if (!basicSuggestionShapeValidNoPosition(suggestion)) {
       console.warn('Missing required field(s) on suggestion:', suggestion);
       continue;
     }
 
-    // Validasi kategori/severity awal
+    // Validasi kategori/severity
     if (!['typo', 'baku', 'eyd', 'konteks'].includes(suggestion.category)) {
       console.warn('Invalid category:', suggestion.category);
       continue;
@@ -558,97 +557,56 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
       continue;
     }
 
-    let { start, end, before } = suggestion;
-    // Jaga batas
-    if (typeof start !== 'number') start = 0;
-    if (typeof end !== 'number') end = Math.min(text.length, (start || 0) + String(before || '').length);
-    start = Math.max(0, Math.min(start, text.length));
-    end = Math.max(start, Math.min(end, text.length));
-
-    let actualText = text.slice(start, end);
-    if (actualText !== before) {
-      // Coba koreksi: cari kemunculan before terdekat
-      const idxExact = findNearestIndex(text, before, start);
-      if (idxExact !== -1) {
-        const newStart = idxExact;
-        const newEnd = idxExact + String(before || '').length;
-        console.warn('Adjusted offsets (exact match) from', { start, end }, 'to', { start: newStart, end: newEnd });
-        start = newStart;
-        end = newEnd;
-        actualText = text.slice(start, end);
-      } else {
-        // Coba case-insensitive dan set before ke teks asli
-        const idxCI = findNearestIndexCI(text, before, start);
-        if (idxCI !== -1) {
-          const newStart = idxCI;
-          const newEnd = idxCI + String(before || '').length;
-          const actual = text.slice(newStart, newEnd);
-          console.warn('Adjusted offsets (case-insensitive) from', { start, end }, 'to', { start: newStart, end: newEnd }, 'and normalized before to actual substring');
-          start = newStart;
-          end = newEnd;
-          before = actual; // samakan dengan teks asli agar konsumen downstream cocok
-          actualText = actual;
-        } else {
-          console.warn('Before text mismatch and could not auto-correct:', {
-            expected: before,
-            actual: actualText,
-            start,
-            end
-          });
-          continue; // skip jika benar-benar tidak dapat dipetakan
-        }
-      }
-    }
-
-    // Hindari overlap/duplikasi
-    if (overlaps(start, end)) {
-      console.warn('Overlapping suggestion skipped:', { start, end, before });
+    const { before, after } = suggestion;
+    
+    // Validate before exists in text (at least once)
+    if (!text.includes(before)) {
+      console.warn('Before text not found in original text:', before);
       continue;
     }
 
-    // Sanitasi field string untuk menghindari karakter tidak valid/bermasalah
+    // Sanitasi field string
     const sanitizedMessage = sanitizeString(String(suggestion.message), 200);
-    let afterVal = typeof suggestion.after === 'string' ? suggestion.after : String(suggestion.after ?? '');
+    let afterVal = typeof after === 'string' ? after : String(after ?? '');
     afterVal = sanitizeString(afterVal, 100);
+    let beforeVal = sanitizeString(String(before), 100);
 
-    // Guards pascaproses: abaikan saran yang tidak mengubah apa pun
+    // Guards: abaikan saran yang tidak mengubah apa pun
     const normalizeNFC = (s) => (s ?? '').normalize('NFC');
+    
     // 1) after kosong/whitespace-only → skip
     if (!afterVal || afterVal.trim().length === 0) {
-      console.warn('Empty/whitespace-only after skipped:', { before: actualText, after: afterVal });
+      console.warn('Empty/whitespace-only after skipped:', { before: beforeVal, after: afterVal });
       continue;
     }
+    
     // 2) Sama persis → skip
-    if (afterVal === actualText) {
-      console.warn('No-op suggestion skipped (exact equal):', { before: actualText, after: afterVal });
+    if (afterVal === beforeVal) {
+      console.warn('No-op suggestion skipped (exact equal):', { before: beforeVal, after: afterVal });
       continue;
     }
-    // 3) Sama jika di-trim (hanya beda spasi di tepi) → skip
-    if (afterVal.trim() === actualText.trim()) {
-      console.warn('No-op suggestion skipped (trim equal):', { before: actualText, after: afterVal });
+    
+    // 3) Sama jika di-trim → skip
+    if (afterVal.trim() === beforeVal.trim()) {
+      console.warn('No-op suggestion skipped (trim equal):', { before: beforeVal, after: afterVal });
       continue;
     }
-    // 4) Sama setelah normalisasi Unicode NFC → skip
-    if (normalizeNFC(afterVal) === normalizeNFC(actualText)) {
-      console.warn('No-op suggestion skipped (NFC equal):', { before: actualText, after: afterVal });
+    
+    // 4) Sama setelah normalisasi NFC → skip
+    if (normalizeNFC(afterVal) === normalizeNFC(beforeVal)) {
+      console.warn('No-op suggestion skipped (NFC equal):', { before: beforeVal, after: afterVal });
       continue;
     }
 
     const fixed = {
-      ...suggestion,
-      start,
-      end,
-      before: actualText, // pakai substring asli untuk memastikan kecocokan
+      category: suggestion.category,
+      severity: suggestion.severity || 'medium',
+      before: beforeVal,
       after: afterVal,
       message: sanitizedMessage,
+      id: suggestion.id || `sg-${Date.now()}-${i}`
     };
 
-    // Tambahkan ID jika belum ada
-    if (!fixed.id) {
-      fixed.id = `sg-${Date.now()}-${i}`;
-    }
-
-    takenRanges.push([start, end]);
     processedSuggestions.push(fixed);
 
     // Batasi maksimal 30 untuk keamanan
@@ -658,7 +616,37 @@ Kembalikan JSON dengan format yang tepat dan offset yang AKURAT.`;
   return processedSuggestions;
 }
 
-// Validasi bentuk minimum suggestion (tanpa verifikasi posisi yang ketat dulu)
+/**
+ * Deduplicate suggestions - remove duplicates with same before + after
+ * Safety net if LLM still returns duplicates
+ */
+function deduplicateSuggestions(suggestions) {
+  const seen = new Map();
+  
+  return suggestions.filter(suggestion => {
+    const key = `${suggestion.before}|||${suggestion.after}`;
+    
+    if (seen.has(key)) {
+      console.log(`[Dedup] Removing duplicate: ${suggestion.before} → ${suggestion.after}`);
+      return false;
+    }
+    
+    seen.set(key, true);
+    return true;
+  });
+}
+
+// Validasi bentuk minimum suggestion (tanpa position required)
+function basicSuggestionShapeValidNoPosition(suggestion) {
+  if (!suggestion || typeof suggestion !== 'object') return false;
+  const requiredFields = ['category', 'message', 'before', 'after'];
+  for (const field of requiredFields) {
+    if (!(field in suggestion)) return false;
+  }
+  return true;
+}
+
+// Legacy validator with positions (kept for backward compatibility if needed)
 function basicSuggestionShapeValid(suggestion) {
   if (!suggestion || typeof suggestion !== 'object') return false;
   const requiredFields = ['category', 'message', 'before', 'after', 'start', 'end'];
