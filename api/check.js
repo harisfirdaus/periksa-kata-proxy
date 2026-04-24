@@ -1,5 +1,5 @@
 // Vercel API endpoint untuk Periksa Kata
-// Proxy ke OpenAI GPT-4o mini dengan rate limiting dan validation
+// Proxy ke NVIDIA Gemma-3-27b-it dengan rate limiting dan validation
 
 import { createHash } from 'crypto';
 
@@ -8,8 +8,8 @@ const rateLimitStore = new Map();
 
 // Configuration
 const CONFIG = {
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  OPENAI_MODEL: 'gpt-4o-mini',
+  NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+  NVIDIA_MODEL: 'google/gemma-3-27b-it',
   // Upstash / Vercel KV REST (gunakan token write)
   KV_REST_API_URL: process.env.KV_REST_API_URL,
   KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
@@ -134,8 +134,8 @@ export default async function handler(req, res) {
   
   try {
     // Validate API key
-    if (!CONFIG.OPENAI_API_KEY) {
-      console.error('OpenAI API key not configured');
+    if (!CONFIG.NVIDIA_API_KEY) {
+      console.error('NVIDIA API key not configured');
       return res.status(500).json({
         error: 'Service configuration error',
         message: 'API key not configured'
@@ -173,8 +173,8 @@ export default async function handler(req, res) {
     // Create text fingerprint
     const textFingerprint = createTextFingerprint(text);
     
-    // Call OpenAI API
-    console.log('Calling OpenAI API with text:', text.substring(0, 100) + '...');
+    // Call NVIDIA API
+    console.log('Calling NVIDIA API with text:', text.substring(0, 100) + '...');
     console.log('Text length:', text.length, 'characters');
     if (kompasContext && kompasContext.length > 0) {
       console.log('Kompas context:', kompasContext.length, 'issues');
@@ -187,15 +187,15 @@ export default async function handler(req, res) {
     try {
       didCallLLM = true;
       suggestions = await checkTextWithOpenAI(text, kompasContext);
-      console.log('OpenAI API returned suggestions:', suggestions.length);
-      
+      console.log('NVIDIA API returned suggestions:', suggestions.length);
+
       if (suggestions.length === 0) {
-        console.log('OpenAI returned empty suggestions for text:', JSON.stringify(text));
+        console.log('NVIDIA returned empty suggestions for text:', JSON.stringify(text));
       } else {
-        console.log('OpenAI suggestions:', JSON.stringify(suggestions, null, 2));
+        console.log('NVIDIA suggestions:', JSON.stringify(suggestions, null, 2));
       }
     } catch (error) {
-      console.error('OpenAI API call failed:', error);
+      console.error('NVIDIA API call failed:', error);
       didCallLLM = false;
       skippedReason = 'api_error';
       suggestions = [];
@@ -209,7 +209,7 @@ export default async function handler(req, res) {
       meta: {
         llmCalled: didCallLLM,
         skippedReason,
-        modelUsed: CONFIG.OPENAI_MODEL,
+        modelUsed: CONFIG.NVIDIA_MODEL,
         textLength: text.length,
         suggestionsCount: suggestions.length
       }
@@ -402,7 +402,7 @@ function findNearestIndexCI(haystack, needle, approxIndex) {
   return best;
 }
 
-// Call OpenAI API
+// Call NVIDIA API
 async function checkTextWithOpenAI(text, kompasContext = []) {
   // Build system prompt with Kompas context injection
   let systemPrompt = SYSTEM_PROMPT;
@@ -458,14 +458,14 @@ Contoh untuk "Makanan ini enk sekali. Rasanya enk":
 
 Kembalikan JSON dengan format yang tepat, fokus pada unique errors.`
   
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${CONFIG.OPENAI_API_KEY}`,
+      'Authorization': `Bearer ${CONFIG.NVIDIA_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: CONFIG.OPENAI_MODEL,
+      model: CONFIG.NVIDIA_MODEL,
       messages: [
         {
           role: 'system',
@@ -478,20 +478,20 @@ Kembalikan JSON dengan format yang tepat, fokus pada unique errors.`
       ],
       temperature: 0.1,
       max_tokens: 3500,
-      response_format: { type: 'json_object' }
+      chat_template_kwargs: { enable_thinking: false }
     })
   });
   
   if (!response.ok) {
     const errorData = await response.text();
-    console.error('OpenAI API error:', response.status, errorData);
-    throw new Error(`OpenAI API error: ${response.status}`);
+    console.error('NVIDIA API error:', response.status, errorData);
+    throw new Error(`NVIDIA API error: ${response.status}`);
   }
-  
+
   const data = await response.json();
-  
+
   if (!data.choices || data.choices.length === 0) {
-    throw new Error('No response from OpenAI API');
+    throw new Error('No response from NVIDIA API');
   }
   
   const content = data.choices[0].message.content;
@@ -684,21 +684,21 @@ function extractJSONBlock(str) {
 // Retry ketat untuk meminta JSON valid saja
 async function strictRetryJSON(text) {
   try {
-    const strictResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+    const strictResponse = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CONFIG.OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${CONFIG.NVIDIA_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: CONFIG.OPENAI_MODEL,
+        model: CONFIG.NVIDIA_MODEL,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `${text}\n\nPENTING: Keluarkan JSON VALID SAJA sesuai skema (tanpa teks lain). Jika ragu, kembalikan {\"suggestions\": []}.` }
+          { role: 'user', content: `${text}\n\nPENTING: Keluarkan JSON VALID SAJA sesuai skema (tanpa teks lain). Jika ragu, kembalikan {"suggestions": []}.` }
         ],
         temperature: 0,
         max_tokens: 3500,
-        response_format: { type: 'json_object' }
+        chat_template_kwargs: { enable_thinking: false }
       })
     });
     if (!strictResponse.ok) {
