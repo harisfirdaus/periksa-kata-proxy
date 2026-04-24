@@ -17,7 +17,7 @@ const CONFIG = {
     maxRequests: 10,
     windowMs: 60000 // 1 menit
   },
-  MAX_TEXT_LENGTH: 12000,
+  MAX_TEXT_LENGTH: 20000,
   ALLOWED_ORIGINS: [
     'chrome-extension://',
     'moz-extension://',
