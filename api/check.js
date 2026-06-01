@@ -9,7 +9,7 @@ const rateLimitStore = new Map();
 // Configuration
 const CONFIG = {
   NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
-  NVIDIA_MODEL: 'google/gemma-3-27b-it',
+  NVIDIA_MODEL: 'google/gemma-3n-e4b-it',
   // Upstash / Vercel KV REST (gunakan token write)
   KV_REST_API_URL: process.env.KV_REST_API_URL,
   KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
